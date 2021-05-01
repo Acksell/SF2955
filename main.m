@@ -1,13 +1,13 @@
 %%
-rng(42)
+% rng()
 pi=load('stations.mat');
 pi = pi.pos_vec;
 alpha = 0.6;
-sigmaW=0.1;
+sigmaW=0.5;
 deltat=0.5; % seconds
 v=90;
 eta=3;
-zeta=0.05;
+zeta=1.5;
 
 M=500;
 Zvalues = [[0 0]' [3.5 0]' [0 3.5]' [0 -3.5]' [-3.5 0]'];
@@ -17,7 +17,7 @@ X=zeros(6,M);
 variances = sqrt([500 5 5 200 5 5]');
 X(:,1)=randn(6,1).*variances;
 
-s = RandStream('mlfg6331_64');
+s = RandStream('mlfg6331_64','Seed',1337);
 
 P=(ones(5,5)+15*eye(5,5))/20;
 Z=zeros(M,5);
@@ -49,8 +49,8 @@ nbase_stations = 6;
 V = zeta*randn(nbase_stations, M);
 Xpos = [X(1,:); X(4,:)];
 
-Y=zeros(6,M);
-for k=1:6
+Y=zeros(nbase_stations,M);
+for k=1:nbase_stations
     Y(k,:) = v - 10*eta*log10( vecnorm( Xpos - pi(:,k) )) + V(k,:);
 end
 
@@ -58,7 +58,7 @@ end
 plot(Xpos(1,:),Xpos(2,:))
 
 %% Problem
-rng(1337)
+
 q0=getQ0(variances);
 q=getQ(Phi, Psi_z, sigmaW);
 p=getP(eta, pi, zeta, v);
@@ -99,7 +99,7 @@ colorbar()
 % histogram(w(1,:),100)
 % ESS(w(1,:))
 %%
-rng(1337)
+
 q0=getQ0(variances);
 q=getQ(Phi, Psi_z, sigmaW);
 p=getP(eta, pi, zeta, v);
@@ -107,7 +107,7 @@ p=getP(eta, pi, zeta, v);
 N=10000;
 % X0=randn(6,1).*variances;
 % q0(X0)
-[X, tau, w] = SISR(N,M,p,Phi,Psi_z,Psi_w,Y);
+[X_sisr, tau_sisr, w_sisr] = SISR(N,M,p,Phi,Psi_z,Psi_w,Y);
 
 %% Plotting
 
@@ -115,14 +115,14 @@ N=10000;
 figure
 plot(Xpos(1,:),Xpos(2,:),'-k')
 hold on
-plot(tau(:,1),tau(:,2),'-b')
+plot(tau_sisr(:,1),tau_sisr(:,2),'-b')
 plot(pi(1,:),pi(2,:),'*r')
 % figure
 % hist(w)
 
 cmap = jet(256);
-vrescaled = rescale(w(1,:), 1, 256); % Nifty trick!
-numValues = length(w(1,:));
+vrescaled = rescale(w_sisr(1,:), 1, 256); % Nifty trick!
+numValues = length(w_sisr(1,:));
 markerColors = zeros(numValues, 3);
 % Now assign marker colors according to the value of the data.
 for k = 1 : numValues
@@ -131,7 +131,7 @@ for k = 1 : numValues
 end
 % Create the scatter plot.
 figure
-scatter(X(1,1,:), X(1,4,:), [], markerColors);
+scatter(X_sisr(1,1,:), X_sisr(1,4,:), [], markerColors);
 grid on;
 colorbar()
 %%
@@ -152,7 +152,7 @@ function [X, tau, w]=SIS(N,M,p,Phi,Psi_z,Psi_w,Y)
     
     sigmaW=0.5;
     W=sigmaW*randn(M,2,N); 
-    s = RandStream('mlfg6331_64');
+    s = RandStream('mlfg6331_64', 'Seed', 42);
     pop = 1:5;
     tau=zeros(M,2);
     for m=2:M
@@ -189,7 +189,7 @@ function [X, tau, w]=SISR(N,M,p,Phi,Psi_z,Psi_w,Y)
     
     sigmaW=0.5;
     W=sigmaW*randn(M,2,N); 
-    s = RandStream('mlfg6331_64');
+    s = RandStream('mlfg6331_64', 'Seed', 42);
     pop = 1:5;
     tau=zeros(M,2);
     for m=2:M
@@ -199,17 +199,16 @@ function [X, tau, w]=SISR(N,M,p,Phi,Psi_z,Psi_w,Y)
            R = randsample(s,pop,1,true,Z_prob(:,n));
            Z(m,R,n)=1;
        end
-       
-       ind=randsample(N,N,true,w(m,:));
+       w(m,:)=p([squeeze(X(m,1,:)) squeeze(X(m,4,:))],Y(:,m));
+
+       ind=randsample(N,N,true,normalize(w(m,:)));
        X(m,:,:)=X(m,:,ind);
        Z(m,:,:)=Z(m,:,ind);
-       
-       w(m,:)=p([squeeze(X(m,1,:)) squeeze(X(m,4,:))],Y(:,m));
     end
     w=normalize(w);
     for m=1:M
-        tau1 = sum(w(m,:).*squeeze(X(m,1,:))');
-        tau2 = sum(w(m,:).*squeeze(X(m,4,:))');
+        tau1 = sum(squeeze(X(m,1,:))/N);
+        tau2 = sum(squeeze(X(m,4,:))/N);
         tau(m,:)=[tau1; tau2];
     end
 end
