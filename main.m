@@ -54,8 +54,17 @@ for k=1:nbase_stations
     Y(k,:) = v - 10*eta*log10( vecnorm( Xpos - pi(:,k) )) + V(k,:);
 end
 
-% Plot trajectory
-plot(Xpos(1,:),Xpos(2,:))
+
+%% Plot trajectory
+figure
+plot(Xpos(1,:),Xpos(2,:),'-k')
+hold on
+plot(pi(1,:),pi(2,:),'*r')
+
+%%
+Y=load('RSSI-measurements.mat');
+Y=Y.Y;
+M=length(Y);
 
 %% Problem
 
@@ -73,7 +82,7 @@ N=10000;
 
 % Plot trajectory
 figure
-plot(Xpos(1,:),Xpos(2,:),'-k')
+% plot(Xpos(1,:),Xpos(2,:),'-k')
 hold on
 plot(tau_sis(:,1),tau_sis(:,2),'-b')
 plot(pi(1,:),pi(2,:),'*r')
@@ -95,8 +104,17 @@ figure
 scatter(X_sis(1,1,:), X_sis(1,4,:), [], markerColors);
 grid on;
 colorbar()
+%% histogram
 
-% histogram(w(1,:),100)
+mlist=[1, 10, 100, M];
+for m=1:length(mlist)
+    subplot(2,2,m);
+    histogram(log(w_sis(mlist(m),:)),100);
+    title(sprintf('Log-weights at m=%d',mlist(m)))
+    ylabel("frequency")
+    xlabel("log-weights")
+end
+
 % ESS(w(1,:))
 %%
 
@@ -107,13 +125,13 @@ p=getP(eta, pi, zeta, v);
 N=10000;
 % X0=randn(6,1).*variances;
 % q0(X0)
-[X_sisr, tau_sisr, w_sisr] = SISR(N,M,p,Phi,Psi_z,Psi_w,Y);
+[X_sisr, tau_sisr, w_sisr, Zexp] = SISR(N,M,p,Phi,Psi_z,Psi_w,Y);
 
 %% Plotting
 
 % Plot trajectory
 figure
-plot(Xpos(1,:),Xpos(2,:),'-k')
+% plot(Xpos(1,:),Xpos(2,:),'-k')
 hold on
 plot(tau_sisr(:,1),tau_sisr(:,2),'-b')
 plot(pi(1,:),pi(2,:),'*r')
@@ -134,6 +152,42 @@ figure
 scatter(X_sisr(1,1,:), X_sisr(1,4,:), [], markerColors);
 grid on;
 colorbar()
+
+%%
+[maxZ, maxZi]=max(Zexp,[],2);
+[realZ,realmaxZ]=max(Z,[],2);
+
+correct = realmaxZ==maxZi;
+
+sum(correct)/M
+
+%%
+Y=load('RSSI-measurements-unknown-sigma.mat');
+Y=Y.Y(:,1:end);
+M=length(Y);
+
+%%
+
+N=1000;
+gridsize=100;
+Omega=zeros(gridsize,1);
+gridz = linspace(1.8,2.7,gridsize);
+
+for z=1:length(gridz)
+    p=getP(eta, pi, gridz(z), v);
+    [X_sisr, tau_sisr, w_sisr, Zexp] = SISR(N,M,p,Phi,Psi_z,Psi_w,Y);
+    
+    wExp_sisr=exp(w_sisr);
+    Omega(z)=sum(log(sum(wExp_sisr, 2)))-(M+1)*log(N);
+end
+%%
+plot(gridz, Omega)
+title("Log-likelihood depending on \varsigma")
+xlabel("\varsigma")
+ylabel("Log-likelihood")
+[OmegaMax, i]=max(Omega);
+zetaOpt = gridz(i)
+
 %%
 function [X, tau, w]=SIS(N,M,p,Phi,Psi_z,Psi_w,Y)
     Zvalues = [[0 0]' [3.5 0]' [0 3.5]' [0 -3.5]' [-3.5 0]'];
@@ -152,7 +206,7 @@ function [X, tau, w]=SIS(N,M,p,Phi,Psi_z,Psi_w,Y)
     
     sigmaW=0.5;
     W=sigmaW*randn(M,2,N); 
-    s = RandStream('mlfg6331_64', 'Seed', 42);
+    s = RandStream('mlfg6331_64', 'Seed', 43);
     pop = 1:5;
     tau=zeros(M,2);
     for m=2:M
@@ -172,7 +226,7 @@ function [X, tau, w]=SIS(N,M,p,Phi,Psi_z,Psi_w,Y)
     end
 end
 
-function [X, tau, w]=SISR(N,M,p,Phi,Psi_z,Psi_w,Y)
+function [X, tau, w, Zexp]=SISR(N,M,p,Phi,Psi_z,Psi_w,Y)
     Zvalues = [[0 0]' [3.5 0]' [0 3.5]' [0 -3.5]' [-3.5 0]'];
     P=(ones(5,5)+15*eye(5,5))/20;
     w=ones(M,N);
@@ -189,12 +243,14 @@ function [X, tau, w]=SISR(N,M,p,Phi,Psi_z,Psi_w,Y)
     
     sigmaW=0.5;
     W=sigmaW*randn(M,2,N); 
-    s = RandStream('mlfg6331_64', 'Seed', 42);
+    s = RandStream('mlfg6331_64', 'Seed', 43);
     pop = 1:5;
     tau=zeros(M,2);
+
     for m=2:M
        X(m,:,:)=Phi*squeeze(X(m-1,:,:)) + Psi_z*(Zvalues*squeeze(Z(m-1,:,:))) + Psi_w*squeeze(W(m,:,:));
        Z_prob = P*squeeze(Z(m-1,:,:));
+
        for n=1:N
            R = randsample(s,pop,1,true,Z_prob(:,n));
            Z(m,R,n)=1;
@@ -205,12 +261,15 @@ function [X, tau, w]=SISR(N,M,p,Phi,Psi_z,Psi_w,Y)
        X(m,:,:)=X(m,:,ind);
        Z(m,:,:)=Z(m,:,ind);
     end
-    w=normalize(w);
+    Zexp = zeros(5,M);
+
     for m=1:M
         tau1 = sum(squeeze(X(m,1,:))/N);
         tau2 = sum(squeeze(X(m,4,:))/N);
+        Zexp(:,m) = sum(squeeze(Z(m,:,:))/N, 2);
         tau(m,:)=[tau1; tau2];
     end
+    Zexp=Zexp';
 end
 
 function [W]=normalize(wLog)
