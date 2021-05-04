@@ -86,9 +86,6 @@ figure
 hold on
 plot(tau_sis(:,1),tau_sis(:,2),'-b')
 plot(pi(1,:),pi(2,:),'*r')
-% figure
-% hist(w)
-
 
 cmap = jet(256);
 vrescaled = rescale(w_sis(1,:), 1, 256); % Nifty trick!
@@ -115,7 +112,8 @@ for m=1:length(mlist)
     xlabel("log-weights")
 end
 
-% ESS(w(1,:))
+ESS(w(1,:))
+
 %%
 
 q0=getQ0(variances);
@@ -168,7 +166,7 @@ M=length(Y);
 
 %%
 
-N=1000;
+N=10000;
 gridsize=100;
 Omega=zeros(gridsize,1);
 gridz = linspace(1.8,2.7,gridsize);
@@ -250,11 +248,15 @@ function [X, tau, w, Zexp]=SISR(N,M,p,Phi,Psi_z,Psi_w,Y)
     for m=2:M
        X(m,:,:)=Phi*squeeze(X(m-1,:,:)) + Psi_z*(Zvalues*squeeze(Z(m-1,:,:))) + Psi_w*squeeze(W(m,:,:));
        Z_prob = P*squeeze(Z(m-1,:,:));
+       % taken from https://se.mathworks.com/matlabcentral/answers/257508-looking-for-something-like-a-matrix-version-of-randsample-vectorization
+       x = rand(1,size(Z_prob,2));
+       C = repmat(x,size(Z_prob,1),1)<cumsum(Z_prob);
+       Z(m,:,:) = [C(1,:); xor(C(2:end,:),C(1:end-1,:))];
+%        for n=1:N
+%            R = randsample(s,pop,1,true,Z_prob(:,n));
+%            Z(m,R,n)=1;
+%        end
 
-       for n=1:N
-           R = randsample(s,pop,1,true,Z_prob(:,n));
-           Z(m,R,n)=1;
-       end
        w(m,:)=p([squeeze(X(m,1,:)) squeeze(X(m,4,:))],Y(:,m));
 
        ind=randsample(N,N,true,normalize(w(m,:)));
