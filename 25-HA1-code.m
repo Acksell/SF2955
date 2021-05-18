@@ -82,7 +82,7 @@ N=10000;
 
 % Plot trajectory
 figure
-% plot(Xpos(1,:),Xpos(2,:),'-k')
+plot(Xpos(1,:),Xpos(2,:),'-k')
 hold on
 plot(tau_sis(:,1),tau_sis(:,2),'-b')
 plot(pi(1,:),pi(2,:),'*r')
@@ -112,7 +112,9 @@ for m=1:length(mlist)
     xlabel("log-weights")
 end
 
-ESS(w(1,:))
+%%
+
+ess=[ESS(w_sis(1,:)) ESS(w_sis(10,:)) ESS(w_sis(100,:)) ESS(w_sis(M,:))];
 
 %%
 
@@ -123,7 +125,7 @@ p=getP(eta, pi, zeta, v);
 N=10000;
 % X0=randn(6,1).*variances;
 % q0(X0)
-[X_sisr, tau_sisr, w_sisr, Zexp] = SISR(N,M,p,Phi,Psi_z,Psi_w,Y);
+[X_sisr, Z_sisr, tau_sisr, w_sisr, Zexp] = SISR(N,M,p,Phi,Psi_z,Psi_w,Y);
 
 %% Plotting
 
@@ -151,13 +153,28 @@ scatter(X_sisr(1,1,:), X_sisr(1,4,:), [], markerColors);
 grid on;
 colorbar()
 
-%%
+%% problem 4, alternative 1
 [maxZ, maxZi]=max(Zexp,[],2);
 [realZ,realmaxZ]=max(Z,[],2);
 
 correct = realmaxZ==maxZi;
 
 sum(correct)/M
+
+%% problem 4, alternative 2
+[mostProb, iMax]=max(w_sisr,[],2);
+most_probable_Z=zeros(1,M);
+for m=1:M
+    mostprobZ=Z_sisr(m,:,iMax(m));
+    [Z,maxZ]=max(mostprobZ);
+    most_probable_Z(m)=maxZ;
+end
+% most_probable_Z=squeeze(Z_sisr(:,:,iMax));
+
+[realZ,realmaxZ]=max(Z,[],2);
+correct = realmaxZ==most_probable_Z;
+sum(correct)/M
+
 
 %%
 Y=load('RSSI-measurements-unknown-sigma.mat');
@@ -166,18 +183,22 @@ M=length(Y);
 
 %%
 
-N=10000;
-gridsize=100;
+N=4000;
+gridsize=30;
 Omega=zeros(gridsize,1);
-gridz = linspace(1.8,2.7,gridsize);
+gridz = linspace(2.0,2.4,gridsize);
 
 for z=1:length(gridz)
+    z
     p=getP(eta, pi, gridz(z), v);
-    [X_sisr, tau_sisr, w_sisr, Zexp] = SISR(N,M,p,Phi,Psi_z,Psi_w,Y);
+    [X_sisr, Z_sisr, tau_sisr, w_sisr, Zexp] = SISR(N,M,p,Phi,Psi_z,Psi_w,Y);
     
     wExp_sisr=exp(w_sisr);
     Omega(z)=sum(log(sum(wExp_sisr, 2)))-(M+1)*log(N);
 end
+
+
+
 %%
 plot(gridz, Omega)
 title("Log-likelihood depending on \varsigma")
@@ -185,6 +206,16 @@ xlabel("\varsigma")
 ylabel("Log-likelihood")
 [OmegaMax, i]=max(Omega);
 zetaOpt = gridz(i)
+
+zetaOpt=2.2;
+p=getP(eta, pi, zetaOpt, v);
+N=10000;
+[X_sisr, Z_sisr, tau_sisr, w_sisr, Zexp] = SISR(N,M,p,Phi,Psi_z,Psi_w,Y);
+
+figure
+plot(tau_sisr(:,1),tau_sisr(:,2),'-b')
+hold on
+plot(pi(1,:),pi(2,:),'*r')
 
 %%
 function [X, tau, w]=SIS(N,M,p,Phi,Psi_z,Psi_w,Y)
@@ -210,10 +241,11 @@ function [X, tau, w]=SIS(N,M,p,Phi,Psi_z,Psi_w,Y)
     for m=2:M
        X(m,:,:)=Phi*squeeze(X(m-1,:,:)) + Psi_z*(Zvalues*squeeze(Z(m-1,:,:))) + Psi_w*squeeze(W(m,:,:));
        Z_prob = P*squeeze(Z(m-1,:,:));
-       for n=1:N
-           R = randsample(s,pop,1,true,Z_prob(:,n));
-           Z(m,R,n)=1;
-       end
+       % taken from https://se.mathworks.com/matlabcentral/answers/257508-looking-for-something-like-a-matrix-version-of-randsample-vectorization
+       x = rand(1,size(Z_prob,2));
+       C = repmat(x,size(Z_prob,1),1)<cumsum(Z_prob);
+       Z(m,:,:) = [C(1,:); xor(C(2:end,:),C(1:end-1,:))];
+
        w(m,:)=w(m-1,:) + p([squeeze(X(m,1,:)) squeeze(X(m,4,:))],Y(:,m));
     end
     w=normalize(w);
@@ -224,7 +256,7 @@ function [X, tau, w]=SIS(N,M,p,Phi,Psi_z,Psi_w,Y)
     end
 end
 
-function [X, tau, w, Zexp]=SISR(N,M,p,Phi,Psi_z,Psi_w,Y)
+function [X, Z, tau, w, Zexp]=SISR(N,M,p,Phi,Psi_z,Psi_w,Y)
     Zvalues = [[0 0]' [3.5 0]' [0 3.5]' [0 -3.5]' [-3.5 0]'];
     P=(ones(5,5)+15*eye(5,5))/20;
     w=ones(M,N);
@@ -252,10 +284,7 @@ function [X, tau, w, Zexp]=SISR(N,M,p,Phi,Psi_z,Psi_w,Y)
        x = rand(1,size(Z_prob,2));
        C = repmat(x,size(Z_prob,1),1)<cumsum(Z_prob);
        Z(m,:,:) = [C(1,:); xor(C(2:end,:),C(1:end-1,:))];
-%        for n=1:N
-%            R = randsample(s,pop,1,true,Z_prob(:,n));
-%            Z(m,R,n)=1;
-%        end
+
 
        w(m,:)=p([squeeze(X(m,1,:)) squeeze(X(m,4,:))],Y(:,m));
 
@@ -264,7 +293,7 @@ function [X, tau, w, Zexp]=SISR(N,M,p,Phi,Psi_z,Psi_w,Y)
        Z(m,:,:)=Z(m,:,ind);
     end
     Zexp = zeros(5,M);
-
+    
     for m=1:M
         tau1 = sum(squeeze(X(m,1,:))/N);
         tau2 = sum(squeeze(X(m,4,:))/N);
