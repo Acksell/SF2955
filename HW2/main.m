@@ -1,5 +1,7 @@
 %% 
 tau=load("coal-mine.csv");
+obs = load("mixture-observations.csv");
+
 
 %%
 close all
@@ -9,22 +11,29 @@ rng(42)
 
 
 params=struct();
-params.d=3;
+params.d=4;
 params.vartheta=2;
 params.tau = tau;
 
 t=linspace(1851,1963, params.d+1);
-params.rho=1;
+params.rho=10;
 
 % t=randn(1,d);
 % t=[1851 t 1963];
 
+%%
+N = 10;
+figure
+theta = EM(obs, N, 0.1882);
+set(gca, 'YScale','log')
+plot(1:N, log(theta), '-*')
 
+%%
 lambda=ones(1, params.d);
 theta=(4)/(sum(lambda) + params.vartheta);
 
-K=1000;
-thetaStore=zeros(K,1);
+K=10000;
+thetaStore=zeros(K,1);  
 lambdaStore=zeros(K,params.d);
 tStore=zeros(K,params.d+1);
 for i=1:K
@@ -48,8 +57,27 @@ figure
 hold on
 hist(params.tau, 30)
 for i = 2:params.d
-  line([t(i), t(i)], ylim, 'LineWidth', 2, 'Color', 'r');
+  point = mean(tStore(burnIn:end, i));
+  line([point, point], ylim, 'LineWidth', 2, 'Color', 'r');
 end
+
+
+%%
+function [theta] = EM(data, N, theta0)
+    theta = zeros(N, 1);
+    theta(1) = theta0;
+    
+    for i = 2:N
+      probabilities = zeros(1, length(data));
+      for x = 0:1
+        probabilities = probabilities + normpdf(data, x, x + 1)*(1 - theta(i-1))^(1 - x)*theta(i-1)^x;
+      end
+      theta(i) = mean(probabilities);
+    end
+end
+
+
+
 
 %%
 function [n]=ndisasters(tau, t)
@@ -73,21 +101,21 @@ function [theta, lambda, t]=GibbsStep(~, lambda, t, params)
 end
 
 function [theta]=thetaConditional(lambda, params)
-    theta= 4/(sum(lambda) + params.vartheta);%gamrnd(4, 1/(sum(lambda) + params.vartheta));
+    theta= gamrnd(4, 1/(sum(lambda) + params.vartheta));
 end
 
 function [lambda]=lambdaConditional(theta, t, params)
     lambda=zeros(params.d, 1);
     nDisasters = ndisasters(params.tau, t);
     for i=1:length(lambda)
-        lambda(i)= (nDisasters(i) + 2) / (t(i + 1) - t(i) + theta);%gamrnd(nDisasters(i)+2, 1/(t(i+1)-t(i) + theta));
+        lambda(i)= gamrnd(nDisasters(i)+2, 1/(t(i+1)-t(i) + theta));
     end
 end
 
 function [p] = tConditional(t, lambdas, params)
     nDisasters = ndisasters(params.tau, t);
     T = diff(t);
-    p = exp(-T .* lambdas') * prod(lambdas' .^ nDisasters) * prod(T);
+    p = exp(-T * lambdas) * prod(lambdas' .^ nDisasters) * prod(T);
 end
 
 function [t]=tMetropolisHastings(lambda, t, params)
