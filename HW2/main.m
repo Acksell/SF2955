@@ -4,7 +4,7 @@ obs = load("mixture-observations.csv");
 
 
 %%
-close all
+% close all
 % Gibbs sampling + MH
 rng(42)
 
@@ -12,11 +12,16 @@ rng(42)
 
 params=struct();
 params.d=4;
-params.vartheta=2;
+params.vartheta=1;
 params.tau = tau;
 
-t=linspace(1851,1963, params.d+1);
-params.rho=10;
+% t=linspace(1851,1963, params.d+1);
+c=1:(params.d-1);
+tinit=ones(1,params.d-1)*1851;
+tinit=tinit+c;
+tinit=[1851 tinit 1963];
+
+params.rho=1;
 
 % t=randn(1,d);
 % t=[1851 t 1963];
@@ -26,7 +31,7 @@ N = 10;
 figure
 theta = EM(obs, N, 0.1882);
 set(gca, 'YScale','log')
-plot(1:N, log(theta), '-*')
+plot(1:N,theta, '-*')
 
 %%
 lambda=ones(1, params.d);
@@ -35,33 +40,64 @@ theta=(4)/(sum(lambda) + params.vartheta);
 K=10000;
 thetaStore=zeros(K,1);  
 lambdaStore=zeros(K,params.d);
-tStore=zeros(K,params.d+1);
+tStore=zeros(K+1,params.d+1);
+tStore(1,:)=tinit;
+acceptedStore=zeros(K,1);
 for i=1:K
-    [theta,lambda,t]=GibbsStep(theta, lambda, t, params);
+    [theta,lambda,t,accepted]=GibbsStep(theta, lambda, t, params);
     thetaStore(i)=theta;
     lambdaStore(i,:)=lambda;
-    tStore(i,:)=t;
+    tStore(i+1,:)=t;
+    acceptedStore(i)=accepted;
 end
+mean(thetaStore)
+rate=sum(acceptedStore)/K
+%%
+plot(tStore(1:100,:))
+%%
+plot(cumsum(acceptedStore)./(1:K)')
 %%
 burnIn= 0.3 * K;
 figure
-plot(thetaStore(burnIn:end))
+histogram(thetaStore(burnIn:end))
 title("Theta")
-figure
-plot(lambdaStore(burnIn:end,1))
-title("Lambdas")
-figure
-plot(tStore(burnIn:end,:))
-title("Breakpoints")
-figure
-hold on
+% figure
+% histogram(lambdaStore(burnIn:end,1))
+% title("Lambdas")
+% figure
+% plot(tStore(burnIn:end,:))
+% title("Breakpoints")
+
+%%
+subplot(2,2,2)
 hist(params.tau, 30)
+title("Location of breakpoints")
+xlabel("Year")
+ylabel("Number of disasters")
 for i = 2:params.d
   point = mean(tStore(burnIn:end, i));
   line([point, point], ylim, 'LineWidth', 2, 'Color', 'r');
 end
 
+%% Breakpoints plotting
+figure
+hold on
+for i=2:(params.d)
+    histogram(tStore(burnIn:end,i),20)
+end
+title("Breakpoints")
+xlabel("Year")
+ylabel("Number of breakpoints in bin")
 
+%% Intensities lambda
+figure
+hold on
+for i=1:(params.d)
+    histogram(lambdaStore(burnIn:end,i),20)
+end
+title("Intensities \lambda_i")
+xlabel("Year")
+ylabel("Number in bin")
 %%
 function [theta] = EM(data, N, theta0)
     theta = zeros(N, 1);
@@ -70,7 +106,7 @@ function [theta] = EM(data, N, theta0)
     for i = 2:N
       probabilities = zeros(1, length(data));
       for x = 0:1
-        probabilities = probabilities + normpdf(data, x, x + 1)*(1 - theta(i-1))^(1 - x)*theta(i-1)^x;
+        probabilities = probabilities + log(normpdf(data, x, x + 1))+log((1 - theta(i-1)))*(1 - x)+log(theta(i-1))*x;
       end
       theta(i) = mean(probabilities);
     end
@@ -94,14 +130,14 @@ function [n]=ndisasters(tau, t)
   n=histcounts(tau,t);
 end
 
-function [theta, lambda, t]=GibbsStep(~, lambda, t, params)
+function [theta, lambda, t, accepted]=GibbsStep(~, lambda, t, params)
     theta=thetaConditional(lambda, params);
     lambda=lambdaConditional(theta, t, params);
-    t=tMetropolisHastings(lambda, t, params);
+    [t,accepted]=tMetropolisHastings(lambda, t, params);
 end
 
 function [theta]=thetaConditional(lambda, params)
-    theta= gamrnd(4, 1/(sum(lambda) + params.vartheta));
+    theta= gamrnd(2*params.d+2, 1/(sum(lambda) + params.vartheta));
 end
 
 function [lambda]=lambdaConditional(theta, t, params)
@@ -118,7 +154,7 @@ function [p] = tConditional(t, lambdas, params)
     p = exp(-T * lambdas) * prod(lambdas' .^ nDisasters) * prod(T);
 end
 
-function [t]=tMetropolisHastings(lambda, t, params)
+function [t,accepted]=tMetropolisHastings(lambda, t, params)
     if length(t) > 2
         tcand=t;
         epsilon=betarnd(params.rho, params.rho, 1, params.d-1);
@@ -128,7 +164,7 @@ function [t]=tMetropolisHastings(lambda, t, params)
 %         size(t(3:end))
 %         size(t(1:end-2))
         tcand(2:end-1)=t(1:end-2) + epsilon.*(t(3:end) - t(1:end-2));
-
+        accepted=0;
         U = rand(1,params.d);
         for i=2:(params.d)
             if tcand(i) > tcand(i + 1)
@@ -142,8 +178,9 @@ function [t]=tMetropolisHastings(lambda, t, params)
                          
             if U(i-1)<=alpha
                 t(i)=tcand(i);
+                accepted=accepted+1;
             end
         end
-        
+        accepted=accepted/(params.d-1);
     end
 end
